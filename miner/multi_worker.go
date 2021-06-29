@@ -1,6 +1,8 @@
 package miner
 
 import (
+	"encoding/json"
+	"math/big"
 	"os"
 	"time"
 
@@ -82,6 +84,27 @@ func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine cons
 		queue:       queue,
 	})
 
+	if jsonMEVLogFile != nil {
+		type r struct {
+			blockNumber *big.Int
+			createdAt   time.Time
+			profit      *big.Int
+			isFlashbots bool
+			mevTxs      types.Transactions
+		}
+
+		regularWorker.newTaskHook = func(t *task) {
+			if err := json.NewEncoder(jsonMEVLogFile).Encode(r{
+				blockNumber: t.block.Number(),
+				createdAt:   t.createdAt,
+				profit:      t.profit,
+				isFlashbots: t.isFlashbots,
+				mevTxs:      t.mevPoolTxns,
+			}); err != nil {
+				log.Info("Writing jsonMEV log failed", err)
+			}
+		}
+	}
 	workers := []*worker{regularWorker}
 
 	for i := 1; i <= config.MaxMergedBundles; i++ {
