@@ -86,22 +86,22 @@ func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine cons
 
 	if jsonMEVLogFile != nil {
 		type r struct {
-			blockNumber      *big.Int
-			createdAt        time.Time
-			profit           *big.Int
-			isFlashbots      bool
-			mevTxs           types.Transactions
-			maxMergedBundles int
+			BlockNumber      *big.Int
+			CreatedAt        time.Time
+			Profit           *big.Int
+			IsFlashbots      bool
+			MevTxs           types.Transactions
+			MaxMergedBundles int
 		}
 
 		regularWorker.newTaskHook = func(t *task) {
 			if err := json.NewEncoder(jsonMEVLogFile).Encode(r{
-				blockNumber:      t.block.Number(),
-				createdAt:        t.createdAt,
-				profit:           t.profit,
-				isFlashbots:      t.isFlashbots,
-				mevTxs:           t.mevPoolTxns,
-				maxMergedBundles: t.maxMergedBundles,
+				BlockNumber:      t.block.Number(),
+				CreatedAt:        t.createdAt,
+				Profit:           t.profit,
+				IsFlashbots:      t.isFlashbots,
+				MevTxs:           t.mevPoolTxns,
+				MaxMergedBundles: t.maxMergedBundles,
 			}); err != nil {
 				log.Info("Writing jsonMEV log failed", err)
 			}
