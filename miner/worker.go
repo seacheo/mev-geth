@@ -1354,8 +1354,18 @@ func (w *worker) computeBundleGas(bundle types.MevBundle, parent *types.Block, h
 	ethSentToCoinbase := new(big.Int)
 
 	for i, tx := range bundle.Txs {
-		if header.BaseFee != nil && (tx.GasFeeCap().Cmp(header.BaseFee) == -1 || tx.GasFeeCap().Cmp(tx.GasTipCap()) == -1) {
-			return simulatedBundle{}, types.ErrGasFeeCapTooLow
+		if header.BaseFee != nil && tx.Type() == 2 {
+			// Sanity check for extremely large numbers
+			if tx.GasFeeCap().BitLen() > 256 {
+				return simulatedBundle{}, core.ErrFeeCapVeryHigh
+			}
+			if tx.GasTipCap().BitLen() > 256 {
+				return simulatedBundle{}, core.ErrTipVeryHigh
+			}
+			// Ensure gasFeeCap is greater than or equal to gasTipCap.
+			if tx.GasFeeCapIntCmp(tx.GasTipCap()) < 0 {
+				return simulatedBundle{}, core.ErrTipAboveFeeCap
+			}
 		}
 
 		state.Prepare(tx.Hash(), common.Hash{}, i+currentTxCount)
