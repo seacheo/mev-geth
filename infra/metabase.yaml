@@ -110,7 +110,7 @@ Metadata:
       DesiredCount:
         default: "How many Updater tasks do you want to initially execute?"
       TaskName:
-        default: "The name of the Updater ECS Task"
+        default: "The name of the Metabase ECS Task"
       ECSAMI:
         default: "The ECS AMI ID populated from SSM."
       DBHost:
@@ -222,9 +222,12 @@ Resources:
       UserData:
         "Fn::Base64": !Sub |
           #!/bin/bash
-          yum install -y aws-cfn-bootstrap hibagent rsync awscli
+          yum install -y aws-cfn-bootstrap hibagent rsync awscli jq
           yum update -y
           service amazon-ssm-agent restart
+
+          export IP_ADDRESS=$(curl -s http://169.254.170.2/v2/metadata | jq -r .Containers[0].Networks[0].IPv4Addresses[0])
+          echo $IP_ADDRESS $(cat /etc/hostname) >> /etc/hosts
 
           /opt/aws/bin/cfn-init -v --region ${AWS::Region} --stack ${AWS::StackName} --resource ECSLaunchConfiguration
           /opt/aws/bin/cfn-signal -e $? --region ${AWS::Region} --stack ${AWS::StackName} --resource ECSAutoScalingGroup
