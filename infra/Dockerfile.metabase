@@ -1,5 +1,5 @@
 # Start from the metabase container
-FROM metabase/metabase:8ce3dbc1b1e35432c2849d124802d93498577dd9285482126fa9a44f9939615e
+FROM metabase/metabase:v0.40.1
 
 ENV PYTHONUNBUFFERED=1
 RUN apk add --update --no-cache groff less python3 curl jq ca-certificates && ln -sf python3 /usr/bin/python
