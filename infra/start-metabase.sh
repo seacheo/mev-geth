@@ -16,6 +16,12 @@ get_db_password() {
 	fi
 }
 
+set_hostname() {
+	HOSTNAME=`cat /etc/hostname`
+	echo "HOSTNAME: ${HOSTNAME}"
+	echo "${HOSTNAME} 127.0.0.1" >> /etc/hosts
+}
+
 start_metabase() {
 	exec bash -c /app/run_metabase.sh
 }
@@ -23,4 +29,5 @@ start_metabase() {
 # main
 
 get_db_password
+set_hostname
 start_metabase
