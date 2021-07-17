@@ -1,4 +1,4 @@
-#!/bin/sh -x
+#!/bin/sh
 # Starts metabase
 
 get_db_password() {

@@ -437,7 +437,7 @@ Resources:
         - Name: !Ref TaskName
           Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Repository}
           Essential: true
-          MemoryReservation: 6144
+          MemoryReservation: 3072
           Environment:
             - Name: "MB_DB_TYPE"
               Value: postgres
@@ -445,9 +445,9 @@ Resources:
               Value: !Ref DBHost
             - Name: "MB_DB_DBNAME"
               Value: !Ref DBName
-            - Name: "MS_DB_PORT"
+            - Name: "MB_DB_PORT"
               Value: !Ref DBPort
-            - Name: "MS_DB_USER"
+            - Name: "MB_DB_USER"
               Value: !Ref DBUser
             - Name: "region"
               Value: !Ref AWS::Region
