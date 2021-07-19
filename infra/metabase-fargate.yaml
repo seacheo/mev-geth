@@ -1,0 +1,477 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  This template creates an automated continuous deployment pipeline to Amazon Elastic Container Service (ECS)
+  Created by Luke Youngblood, luke@blockscale.net
+
+Parameters:
+  # GitHub Parameters
+
+  GitHubUser:
+    Type: String
+    Default: lyoungblood
+    Description: Your team or username on GitHub.
+
+  GitHubRepo:
+    Type: String
+    Default: mev-geth
+    Description: The repository name.
+
+  GitHubBranch:
+    Type: String
+    Default: master
+    Description: The branch of the repo to continuously deploy.
+
+  GitHubToken:
+    Type: String
+    NoEcho: true
+    Description: >
+      Token for the team or user specified above. (https://github.com/settings/tokens)
+
+  # VPC Parameters
+
+  VPC:
+    Type: AWS::EC2::VPC::Id
+
+  Subnets:
+    Type: List<AWS::EC2::Subnet::Id>
+
+  VpcCIDR:
+    Type: String
+    Default: 172.31.0.0/16
+
+  # ECS Parameters
+
+  DesiredCount:
+    Type: Number
+    Default: 0
+
+  TaskName:
+    Type: String
+    Default: metabase
+
+  # Metabase Parameters
+
+  DBHost:
+    Type: String
+    Default: mev-inspect.clodh7jznkun.us-east-2.rds.amazonaws.com
+
+  DBName:
+    Type: String
+    Default: metabase
+
+  DBPort:
+    Type: Number
+    Default: 5432
+  
+  DBUser:
+    Type: String
+    Default: metabase
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterLabels:
+      GitHubUser:
+        default: "User"
+      GitHubRepo:
+        default: "Mev-Geth GitHub Repository"
+      GitHubBranch:
+        default: "Branch in GitHub repository"
+      GitHubToken:
+        default: "Personal Access Token"
+      VPC:
+        default: "Choose which VPC the autoscaling group should be deployed to"
+      Subnets:
+        default: "Choose which subnets the autoscaling group should be deployed to"
+      VpcCIDR:
+        default: "VPC CIDR Block"
+      DesiredCount:
+        default: "How many metabase tasks do you want to initially execute?"
+      TaskName:
+        default: "The name of the Metabase ECS Task"
+      ECSAMI:
+        default: "The ECS AMI ID populated from SSM."
+      DBHost:
+        default: "The hostname of the RDS database instance."
+      DBName:
+        default: "The database name used by metabase."
+      DBPort:
+        default: "The listening port of the RDS database instance."
+      DBUser:
+        default: "The username used to connect to the RDS database instance."
+    ParameterGroups:
+      - Label:
+          default: GitHub Configuration
+        Parameters:
+          - GitHubRepo
+          - GitHubBranch
+          - GitHubUser
+          - GitHubToken
+      - Label:
+          default: VPC Configuration
+        Parameters:
+          - VPC
+          - Subnets
+          - VpcCIDR
+      - Label:
+          default: ECS Configuration
+        Parameters:
+          - DesiredCount
+          - TaskName
+      - Label:
+          default: Metabase Configuration
+        Parameters:
+          - DBHost
+          - DBName
+          - DBPort
+          - DBUser
+
+Resources:
+  # ECS Resources
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref AWS::StackName
+
+  ALBSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: !Sub ${AWS::StackName}-sg
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ALB-${AWS::StackName}-sg
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref VpcCIDR
+
+  TaskSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: !Sub ${AWS::StackName}-sg
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub Task-${AWS::StackName}-sg
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: !Ref VpcCIDR
+
+  MBLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${AWS::StackName}-mb-NLB
+      Type: application
+      Scheme: internal
+      SecurityGroups: 
+      - !Ref ALBSecurityGroup
+      Subnets: !Ref Subnets
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-mb-NLB
+
+  MBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn: MBLoadBalancer
+    Properties:
+      VpcId: !Ref VPC
+      Port: 3000
+      Protocol: HTTP
+      TargetType: ip
+
+  MBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref MBTargetGroup
+      LoadBalancerArn: !Ref MBLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: !Sub ecs-task-SSM-${AWS::StackName}
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "ssm:DescribeParameters"
+                  - "ssm:PutParameter"
+                  - "ssm:GetParameters"
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/*"
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${AWS::StackName}
+      RetentionInDays: 14
+
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn: MBListener
+    Properties:
+      Cluster: !Ref Cluster
+      DesiredCount: !Ref DesiredCount
+      TaskDefinition: !Ref TaskDefinition
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups: 
+          - !Ref TaskSecurityGroup
+          Subnets: !Ref Subnets
+      DeploymentConfiguration:
+        MaximumPercent: 150
+        MinimumHealthyPercent: 50
+      LoadBalancers:
+        - ContainerName: !Ref TaskName
+          ContainerPort: 3000
+          TargetGroupArn: !Ref MBTargetGroup
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${AWS::StackName}-${TaskName}
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !Ref TaskExecutionRole
+      Cpu: 512
+      Memory: 2048
+      ContainerDefinitions:
+        - Name: !Ref TaskName
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Repository}
+          Essential: true
+          Environment:
+            - Name: "MB_DB_TYPE"
+              Value: postgres
+            - Name: "MB_DB_HOST"
+              Value: !Ref DBHost
+            - Name: "MB_DB_DBNAME"
+              Value: !Ref DBName
+            - Name: "MB_DB_PORT"
+              Value: !Ref DBPort
+            - Name: "MB_DB_USER"
+              Value: !Ref DBUser
+            - Name: "region"
+              Value: !Ref AWS::Region
+          PortMappings:
+            - ContainerPort: 3000
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: !Ref AWS::StackName
+
+  # CodePipeline Resources
+
+  Repository:
+    Type: AWS::ECR::Repository
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - ecr:GetAuthorizationToken
+              - Resource: !Sub arn:aws:s3:::${ArtifactBucket}/*
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetObjectVersion
+              - Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${Repository}
+                Effect: Allow
+                Action:
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource:
+                  - !Sub arn:aws:s3:::${ArtifactBucket}/*
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - ecs:DescribeServices
+                  - ecs:DescribeTaskDefinition
+                  - ecs:DescribeTasks
+                  - ecs:ListTasks
+                  - ecs:RegisterTaskDefinition
+                  - ecs:UpdateService
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                  - iam:PassRole
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                docker: 19
+            pre_build:
+              commands:
+                - $(aws ecr get-login --no-include-email)
+                - TAG="$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | head -c 8)"
+                - IMAGE_URI="${REPOSITORY_URI}:${TAG}"
+                - cp infra/Dockerfile.metabase ./Dockerfile
+            build:
+              commands:
+                - docker build --tag "$IMAGE_URI" .
+                - docker build --tag "${REPOSITORY_URI}:latest" .
+            post_build:
+              commands:
+                - docker push "$IMAGE_URI"
+                - docker push "${REPOSITORY_URI}:latest"
+                - printf '[{"name":"metabase","imageUri":"%s"}]' "$IMAGE_URI" > images.json
+          artifacts:
+            files: images.json
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/docker:17.09.0
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: REPOSITORY_URI
+            Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Repository}
+      Name: !Ref AWS::StackName
+      ServiceRole: !Ref CodeBuildServiceRole
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: App
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              Configuration:
+                Owner: !Ref GitHubUser
+                Repo: !Ref GitHubRepo
+                Branch: !Ref GitHubBranch
+                OAuthToken: !Ref GitHubToken
+              OutputArtifacts:
+                - Name: App
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              InputArtifacts:
+                - Name: App
+              OutputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+        - Name: Deploy
+          Actions:
+            - Name: Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: ECS
+              Configuration:
+                ClusterName: !Ref Cluster
+                ServiceName: !Ref ECSService
+                FileName: images.json
+              InputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+
+Outputs:
+  ClusterName:
+    Value: !Ref Cluster
+  Service:
+    Value: !Ref ECSService
+  PipelineUrl:
+    Value: !Sub https://console.aws.amazon.com/codepipeline/home?region=${AWS::Region}#/view/${Pipeline}
