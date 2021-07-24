@@ -4,8 +4,7 @@
 get_db_password() {
 	# Check to make sure instance role is properly set
 	. /root/.profile
-	env
-	curl $ECS_CONTAINER_METADATA_URI
+	export AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
 	# Loads the Metabase RDS password from SSM
 	echo "Retrieving database password..."
 	export MB_DB_PASS=`aws --region=$region ssm get-parameters \
