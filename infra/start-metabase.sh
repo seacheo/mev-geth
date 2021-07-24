@@ -3,7 +3,7 @@
 
 get_db_password() {
 	# Check to make sure instance role is properly set
-	cat /root/.profile
+	env
 	# Loads the Metabase RDS password from SSM
 	echo "Retrieving database password..."
 	export MB_DB_PASS=`aws --region=$region ssm get-parameters \
