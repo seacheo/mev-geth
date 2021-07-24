@@ -28,5 +28,5 @@ start_metabase() {
 # main
 
 get_db_password
-set_hostname
+#set_hostname
 start_metabase
