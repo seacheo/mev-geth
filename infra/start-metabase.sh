@@ -3,6 +3,7 @@
 
 get_db_password() {
 	# Check to make sure instance role is properly set
+	. /root/.profile
 	env
 	# Loads the Metabase RDS password from SSM
 	echo "Retrieving database password..."
