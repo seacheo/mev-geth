@@ -205,7 +205,9 @@ Resources:
           - Action: sts:AssumeRole
             Effect: Allow
             Principal:
-              Service: ecs-tasks.amazonaws.com
+              Service:
+              - ecs.amazonaws.com
+              - ecs-tasks.amazonaws.com
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
       Policies:
@@ -219,7 +221,7 @@ Resources:
                   - "ssm:PutParameter"
                   - "ssm:GetParameters"
                 Resource:
-                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/*"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/flashbots/metabase/*"
 
   LogGroup:
     Type: AWS::Logs::LogGroup
@@ -257,6 +259,7 @@ Resources:
         - FARGATE
       NetworkMode: awsvpc
       ExecutionRoleArn: !Ref TaskExecutionRole
+      TaskRoleArn: !Ref TaskExecutionRole
       Cpu: 512
       Memory: 2048
       ContainerDefinitions:
