@@ -8,7 +8,7 @@ RUN pip3 install --no-cache --upgrade pip setuptools awscli
 
 # Enable Fargate containers to properly set their task role credentials
 RUN echo 'export $(strings /proc/1/environ | grep AWS_CONTAINER_CREDENTIALS_RELATIVE_URI)' >> /root/.profile
-RUN echo 'export $(curl 169.254.170.2$AWS_CONTAINER_CREDENTIALS_RELATIVE_URI)' >> /root/.profile
+RUN echo 'export $(curl $ECS_CONTAINER_METADATA_URI)' >> /root/.profile
 RUN chmod 755 /root/.profile
 
 COPY ./infra/start-metabase.sh /root/start-metabase.sh
