@@ -166,15 +166,15 @@ Resources:
   MBLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: !Sub ${AWS::StackName}-mb-NLB
+      Name: !Sub ${AWS::StackName}-mb-alb
       Type: application
-      Scheme: internal
+      Scheme: internet-facing
       SecurityGroups: 
       - !Ref ALBSecurityGroup
       Subnets: !Ref Subnets
       Tags:
         - Key: Name
-          Value: !Sub ${AWS::StackName}-mb-NLB
+          Value: !Sub ${AWS::StackName}-mb-alb
 
   MBTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -184,6 +184,10 @@ Resources:
       Port: 3000
       Protocol: HTTP
       TargetType: ip
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 5
+      UnhealthyThresholdCount: 10
 
   MBListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -246,6 +250,7 @@ Resources:
       DeploymentConfiguration:
         MaximumPercent: 150
         MinimumHealthyPercent: 50
+      HealthCheckGracePeriodSeconds: 120
       LoadBalancers:
         - ContainerName: !Ref TaskName
           ContainerPort: 3000
