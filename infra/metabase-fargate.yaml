@@ -135,19 +135,19 @@ Resources:
     Properties:
       ClusterName: !Ref AWS::StackName
 
-  ALBSecurityGroup:
-    Type: "AWS::EC2::SecurityGroup"
-    Properties:
-      GroupDescription: !Sub ${AWS::StackName}-sg
-      VpcId: !Ref VPC
-      Tags:
-        - Key: Name
-          Value: !Sub ALB-${AWS::StackName}-sg
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
+#  ALBSecurityGroup:
+#    Type: "AWS::EC2::SecurityGroup"
+#    Properties:
+#      GroupDescription: !Sub ${AWS::StackName}-sg
+#      VpcId: !Ref VPC
+#      Tags:
+#        - Key: Name
+#          Value: !Sub ALB-${AWS::StackName}-sg
+#      SecurityGroupIngress:
+#        - IpProtocol: tcp
+#          FromPort: 80
+#          ToPort: 80
+#          CidrIp: 0.0.0.0/0
 
   TaskSecurityGroup:
     Type: "AWS::EC2::SecurityGroup"
@@ -169,8 +169,10 @@ Resources:
       Name: !Sub ${AWS::StackName}-mb-alb
       Type: application
       Scheme: internet-facing
-      SecurityGroups: 
-      - !Ref ALBSecurityGroup
+      SecurityGroups:
+      # - !Ref ALBSecurityGroup
+      # CloudFlare-whitelist security group
+      - sg-00b91772bbdfc745c
       Subnets: !Ref Subnets
       Tags:
         - Key: Name
