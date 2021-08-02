@@ -171,8 +171,8 @@ Resources:
       Scheme: internet-facing
       SecurityGroups:
       # - !Ref ALBSecurityGroup
-      # CloudFlare-whitelist security group
-      - sg-00b91772bbdfc745c
+      # CloudFlare-whitelist-http security group
+      - sg-09652b1a31277c4d2
       Subnets: !Ref Subnets
       Tags:
         - Key: Name
