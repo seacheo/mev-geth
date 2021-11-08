@@ -102,9 +102,11 @@ type task struct {
 	block     *types.Block
 	createdAt time.Time
 
-	profit      *big.Int
-	isFlashbots bool
-	worker      int
+
+	profit       *big.Int
+	isFlashbots  bool
+	worker       int
+	isMegabundle bool
 }
 
 const (
@@ -155,6 +157,8 @@ type worker struct {
 	exitCh             chan struct{}
 	resubmitIntervalCh chan time.Duration
 	resubmitAdjustCh   chan *intervalAdjust
+
+	wg sync.WaitGroup
 
 	current      *environment                 // An environment for current running cycle.
 	localUncles  map[common.Hash]*types.Block // A set of side blocks generated locally as the possible uncle blocks.
@@ -257,6 +261,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		recommit = minRecommitInterval
 	}
 
+	worker.wg.Add(4)
 	go worker.mainLoop()
 	go worker.newWorkLoop(recommit)
 	if !flashbots.isFlashbots {
@@ -353,11 +358,9 @@ func (w *worker) isRunning() bool {
 // close terminates all background threads maintained by the worker.
 // Note the worker does not support being closed multiple times.
 func (w *worker) close() {
-	if w.current != nil && w.current.state != nil {
-		w.current.state.StopPrefetcher()
-	}
 	atomic.StoreInt32(&w.running, 0)
 	close(w.exitCh)
+	w.wg.Wait()
 }
 
 // recalcRecommit recalculates the resubmitting interval upon feedback.
@@ -384,6 +387,7 @@ func recalcRecommit(minRecommit, prev time.Duration, target float64, inc bool) t
 
 // newWorkLoop is a standalone goroutine to submit new mining work upon received events.
 func (w *worker) newWorkLoop(recommit time.Duration) {
+	defer w.wg.Done()
 	var (
 		interrupt   *int32
 		minRecommit = recommit // minimal resubmit interval specified by user.
@@ -481,9 +485,15 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 
 // mainLoop is a standalone goroutine to regenerate the sealing task based on the received event.
 func (w *worker) mainLoop() {
+	defer w.wg.Done()
 	defer w.txsSub.Unsubscribe()
 	defer w.chainHeadSub.Unsubscribe()
 	defer w.chainSideSub.Unsubscribe()
+	defer func() {
+		if w.current != nil && w.current.state != nil {
+			w.current.state.StopPrefetcher()
+		}
+	}()
 
 	for {
 		select {
@@ -583,6 +593,7 @@ func (w *worker) mainLoop() {
 // taskLoop is a standalone goroutine to fetch sealing task from the generator and
 // push them to consensus engine.
 func (w *worker) taskLoop() {
+	defer w.wg.Done()
 	var (
 		stopCh chan struct{}
 		prev   common.Hash
@@ -622,7 +633,8 @@ func (w *worker) taskLoop() {
 			// Interrupt previous sealing operation
 			interrupt()
 			stopCh, prev = make(chan struct{}), sealHash
-			log.Info("Proposed miner block", "blockNumber", task.block.Number(), "profit", ethIntToFloat(prevProfit), "isFlashbots", task.isFlashbots, "sealhash", sealHash, "parentHash", prevParentHash, "worker", task.worker)
+
+			log.Info("Proposed miner block", "blockNumber", task.block.Number(), "profit", ethIntToFloat(prevProfit), "isFlashbots", task.isFlashbots, "sealhash", sealHash, "parentHash", prevParentHash, "worker", task.worker, "isMegabundle", task.isMegabundle)
 			if w.skipSealHook != nil && w.skipSealHook(task) {
 				continue
 			}
@@ -643,6 +655,7 @@ func (w *worker) taskLoop() {
 // resultLoop is a standalone goroutine to handle sealing result submitting
 // and flush relative data to the database.
 func (w *worker) resultLoop() {
+	defer w.wg.Done()
 	for {
 		select {
 		case block := <-w.resultCh:
@@ -1158,6 +1171,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		log.Error("Failed to fetch pending transactions", "err", err)
 		return
 	}
+
 	// Short circuit if there is no available pending transactions or bundles.
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
@@ -1165,7 +1179,8 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	if w.flashbots.isFlashbots && len(w.eth.TxPool().AllMevBundles()) > 0 {
 		noBundles = false
 	}
-	if len(pending) == 0 && atomic.LoadUint32(&w.noempty) == 0 && noBundles {
+
+	if len(pending) == 0 && atomic.LoadUint32(&w.noempty) == 0 && noBundles && !w.flashbots.isMegabundleWorker {
 		w.updateSnapshot()
 		return
 	}
@@ -1177,7 +1192,9 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 			localTxs[account] = txs
 		}
 	}
-	if w.flashbots.isFlashbots {
+
+
+	if w.flashbots.isFlashbots && !w.flashbots.isMegabundleWorker {
 		bundles, err := w.eth.TxPool().MevBundles(header.Number, header.Time)
 		if err != nil {
 			log.Error("Failed to fetch pending transactions", "err", err)
@@ -1196,8 +1213,43 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		if w.commitBundle(bundleTxs, w.coinbase, interrupt) {
 			return
 		}
-		w.current.profit.Add(w.current.profit, bundle.totalEth)
+
+		w.current.profit.Add(w.current.profit, bundle.ethSentToCoinbase)
 	}
+	if w.flashbots.isMegabundleWorker {
+		megabundle, err := w.eth.TxPool().GetMegabundle(w.flashbots.relayAddr, header.Number, header.Time)
+		log.Info("Starting to process a Megabundle", "relay", w.flashbots.relayAddr, "megabundle", megabundle, "error", err)
+		if err != nil {
+			return // no valid megabundle for this relay, nothing to do
+		}
+		// Flashbots bundle merging duplicates work by simulating TXes and then committing them once more.
+		// Megabundles API focuses on speed and runs everything in one cycle.
+		coinbaseBalanceBefore := w.current.state.GetBalance(w.coinbase)
+		if w.commitBundle(megabundle.Txs, w.coinbase, interrupt) {
+			log.Info("Could not commit a Megabundle", "relay", w.flashbots.relayAddr, "megabundle", megabundle)
+			return
+		}
+		var txStatuses = map[common.Hash]bool{}
+		for _, receipt := range w.current.receipts {
+			txStatuses[receipt.TxHash] = receipt.Status == types.ReceiptStatusSuccessful
+		}
+		for _, tx := range megabundle.Txs {
+			status, ok := txStatuses[tx.Hash()]
+			if !ok {
+				log.Error("No TX receipt after megabundle simulation", "TxHash", tx.Hash())
+				return
+			}
+			if !status && !containsHash(megabundle.RevertingTxHashes, tx.Hash()) {
+				log.Info("Ignoring megabundle because of failing TX", "relay", w.flashbots.relayAddr, "TxHash", tx.Hash())
+				return
+			}
+		}
+		coinbaseBalanceAfter := w.current.state.GetBalance(w.coinbase)
+		coinbaseDelta := big.NewInt(0).Sub(coinbaseBalanceAfter, coinbaseBalanceBefore)
+		w.current.profit = coinbaseDelta
+		log.Info("Megabundle processed", "relay", w.flashbots.relayAddr, "totalProfit", ethIntToFloat(w.current.profit))
+	}
+
 	if len(localTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(w.current.signer, localTxs, header.BaseFee)
 		if w.commitTransactions(txs, w.coinbase, interrupt) {
@@ -1228,13 +1280,15 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 			interval()
 		}
 		select {
-		case w.taskCh <- &task{receipts: receipts, state: s, block: block, createdAt: time.Now(), profit: w.current.profit, isFlashbots: w.flashbots.isFlashbots, worker: w.flashbots.maxMergedBundles}:
+
+		case w.taskCh <- &task{receipts: receipts, state: s, block: block, createdAt: time.Now(), profit: w.current.profit, isFlashbots: w.flashbots.isFlashbots, worker: w.flashbots.maxMergedBundles, isMegabundle: w.flashbots.isMegabundleWorker}:
 			w.unconfirmed.Shift(block.NumberU64() - 1)
 			log.Info("Commit new mining work", "number", block.Number(), "sealhash", w.engine.SealHash(block.Header()),
 				"uncles", len(uncles), "txs", w.current.tcount,
 				"gas", block.GasUsed(), "fees", totalFees(block, receipts), "profit", ethIntToFloat(w.current.profit),
 				"elapsed", common.PrettyDuration(time.Since(start)),
-				"isFlashbots", w.flashbots.isFlashbots, "worker", w.flashbots.maxMergedBundles)
+
+				"isFlashbots", w.flashbots.isFlashbots, "worker", w.flashbots.maxMergedBundles, "isMegabundle", w.flashbots.isMegabundleWorker)
 
 		case <-w.exitCh:
 			log.Info("Worker has exited")

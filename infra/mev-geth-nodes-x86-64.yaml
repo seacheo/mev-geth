@@ -45,11 +45,13 @@ Parameters:
 
   InstanceType:
     Type: String
-    Default: i3en.xlarge
+
+    Default: i3en.large
 
   MemoryLimit:
     Type: Number
-    Default: 20000
+    Default: 6144
+
 
   KeyPair:
     Type: AWS::EC2::KeyPair::KeyName
@@ -82,6 +84,7 @@ Parameters:
     Type: AWS::SSM::Parameter::Value<String>
     Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
 
+
   PrivateZoneName:
     Type: String
     Default: geth.internal
@@ -89,6 +92,7 @@ Parameters:
   ServiceName:
     Type: String
     Default: node
+
 
   # SNS Parameters
 
@@ -184,6 +188,7 @@ Metadata:
         default: "The DNS zone that should be used for service discovery records."
       ServiceName:
         default: "The service name prefix that should be used for service discovery records."
+
       Network:
         default: "The Ethereum network you will be connecting to"
       SyncMode:
@@ -225,6 +230,7 @@ Metadata:
           - ECSAMI
           - PrivateZoneName
           - ServiceName
+
       - Label:
           default: Mev-Geth Configuration
         Parameters:
@@ -254,6 +260,7 @@ Mappings:
       goerli: mev-geth-updater-fast-goerli-chainbucket-j6dujg8apbna
     eu-west-1:
       mainnet: mev-geth-updater-chainbucket-11hs3dhhz7k0s
+
     #us-west-2:
     #  mainnet:
     #  goerli:
@@ -308,6 +315,7 @@ Resources:
           FromPort: !Ref WsPort
           ToPort: !Ref WsPort
           CidrIp: 172.31.0.0/16
+
 
   ECSAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
@@ -672,6 +680,7 @@ Resources:
           ContainerName: !Ref NodeTaskName
           ContainerPort: !Ref RpcPort
 
+
   NodeTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
@@ -745,6 +754,7 @@ Resources:
         FailureThreshold: 1
       Name: !Sub ${ServiceName}-${Network}-${SyncMode}
       NamespaceId: !Ref PrivateNamespace
+
 
   # CodePipeline Resources
 
@@ -1019,3 +1029,4 @@ Outputs:
   NodeServiceUrl:
     Description: URL of the load balancer for the node service.
     Value: !Sub http://${NodeLoadBalancer.DNSName}
+

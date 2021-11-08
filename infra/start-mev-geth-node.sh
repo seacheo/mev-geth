@@ -43,6 +43,7 @@ start_node() {
             exit 1
         fi
     else
+
         geth \
           --port $netport \
           --http \
@@ -63,6 +64,7 @@ start_node() {
           --gcmode archive \
           --cache 4096 \
           --snapshot=false \
+
           --maxpeers $connections
         if [ $? -ne 0 ]
         then
