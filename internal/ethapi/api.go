@@ -2328,6 +2328,7 @@ func (s *BundleAPI) CallBundle(ctx context.Context, args CallBundleArgs) (map[st
 
 	ret["bundleHash"] = "0x" + common.Bytes2Hex(bundleHash.Sum(nil))
 	return ret, nil
+}
 // Recovers the Ethereum address of the trusted relay that signed the megabundle.
 func RecoverRelayAddress(args SendMegabundleArgs) (common.Address, error) {
 	megabundle := UnsignedMegabundle{Txs: args.Txs, BlockNumber: args.BlockNumber, RevertingTxHashes: args.RevertingTxHashes}
