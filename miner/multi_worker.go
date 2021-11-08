@@ -98,6 +98,7 @@ func newMultiWorker(config *Config, chainConfig *params.ChainConfig, engine cons
 	for i := 1; i <= config.MaxMergedBundles; i++ {
 		workers = append(workers,
 			newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, init, &flashbotsData{
+
 				isFlashbots:        true,
 				isMegabundleWorker: false,
 				queue:              queue,

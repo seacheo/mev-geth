@@ -1405,6 +1405,7 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 		log.Warn("The generic --miner.gastarget flag is deprecated and will be removed in the future!")
 	}
 
+
 	cfg.MaxMergedBundles = ctx.GlobalInt(MinerMaxMergedBundlesFlag.Name)
 
 	addresses := strings.Split(ctx.GlobalString(MinerTrustedRelaysFlag.Name), ",")
